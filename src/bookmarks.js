@@ -1,33 +1,32 @@
-/**
- * File: Bookmarks
- *
- * Maintainer: - Sebastian Kippe <sebastian@kip.pe>
- * Version:    - 0.2.0
- *
- * This module stores bookmarks. It is used by https://webmarks.5apps.com/
- */
+const md5 = require('md5');
 
-var intersection = require('lodash.intersection');
-
-var extend = function (target) {
-  var sources = Array.prototype.slice.call(arguments, 1);
+const extend = function (target) {
+  const sources = Array.prototype.slice.call(arguments, 1);
   sources.forEach(function (source) {
-    for (var key in source) {
+    for (const key in source) {
       target[key] = source[key];
     }
   });
   return target;
 }
 
-var md5 = require('md5');
+const urlHash = function (url) {
+  // url = url; //TODO remove trailing slash
+  return md5(url);
+};
 
-var Bookmarks = function (privateClient, publicClient) {
+
+//
+// Bookmarks module
+//
+
+const Bookmarks = function (privateClient/*, publicClient*/) {
 
   //
   // Types/Schemas
   //
 
-  var baseProperties = {
+  const baseProperties = {
     "id": {
       "type": "string"
     },
@@ -133,87 +132,80 @@ var Bookmarks = function (privateClient, publicClient) {
     }, baseProperties)
   });
 
+
+  /**
+   * @class
+   *
+   * A folder is a collection of bookmarks
+   */
+  class Folder {
+    constructor (folderName) {
+      console.log('constructsorz');
+      this.basePath = encodeURIComponent(folderName);
+      this.client = privateClient.scope(`${this.basePath}/`);
+    }
+
+    find (id) {
+      return privateClient.getObject(`${this.basePath}/${id}`);
+    }
+
+    getAll (maxAge) {
+      return privateClient.getAll(`${this.basePath}/`, maxAge)
+        .then(bookmarks => {
+          if (!bookmarks) return [];
+          return Object.keys(bookmarks).map(id => bookmarks[id]);
+        });
+    }
+
+    searchByURL (url) {
+      const id = urlHash(url);
+      return privateClient.getObject(`${this.basePath}/${id}`);
+    }
+
+    searchByTags (tags) {
+      return this.getAll()
+        .then(bookmarks => {
+          if (!bookmarks) return [];
+          return bookmarks.filter(b => {
+            return b.tags &&
+                   b.tags.filter(tag => tags.includes(tag)).length > 0;
+          });
+        })
+    }
+
+    store (bookmark, bookmarkType='archive-bookmark') {
+      bookmark.id = urlHash(bookmark.url);
+      if (bookmark.createdAt) {
+        bookmark.updatedAt = new Date().toISOString();
+      } else {
+        bookmark.createdAt = new Date().toISOString();
+      }
+      const path = `${this.basePath}/${bookmark.id}`;
+
+      return privateClient.storeObject(bookmarkType, path, bookmark)
+                          .then(() => { return bookmark; });
+    }
+
+    remove (id) {
+      return privateClient.remove(`${this.basePath}/${id}`);
+    }
+  }
+
   //
   // Public functions
   //
 
-  var bookmarks = {
+  const bookmarks = {
     name: 'bookmarks',
-    archive: {
 
-      find: function(id) {
-        var path = "archive/" + id;
+    // DEPRECATED! Please use bookmarks.openFolder() instead.
+    archive: new Folder('archive'),
 
-        return privateClient.getObject(path).then(function(bookmark){
-          return bookmark;
-        });
-      },
-
-      getAll: function(maxAge) {
-        return privateClient.getAll('archive/', maxAge).then(
-        // return privateClient.getAll('archive/', 'archive-bookmark').then(
-          function(bookmarks) {
-            if (!bookmarks) {
-              return [];
-            }
-            return Object.keys(bookmarks).map(function(id) {
-              return bookmarks[id];
-            });
-          });
-      },
-
-      searchByURL: function(url) {
-        var id = this.idForUrl(url);
-        var path = "archive/" + id;
-        return privateClient.getObject(path);
-      },
-
-      searchByTags: function(tags) {
-        return this.getAll()
-          .then( bookmarks => {
-            if (!bookmarks) return []
-            return bookmarks.filter( b => b.tags && intersection(b.tags, tags).length )
-          })
-      },
-
-      store: function(bookmark) {
-        bookmark.id = urlHash(bookmark.url);
-        if (bookmark.createdAt) {
-          bookmark.updatedAt = new Date().toISOString();
-        } else {
-          bookmark.createdAt = new Date().toISOString();
-        }
-        var path = "archive/" + bookmark.id;
-
-        return privateClient.storeObject("archive-bookmark", path, bookmark).
-          then(function() {
-            return bookmark;
-          });
-      },
-
-      remove: function(id) {
-        var path = "archive/" + id;
-
-        return privateClient.remove(path);
-      },
-
-      idForUrl: function(url) {
-        return urlHash(url);
-      }
-
+    openFolder (folderName) {
+      return new Folder(folderName);
     },
 
-    client: privateClient
-
-  };
-
-  //
-  // Helpers
-  //
-
-  var urlHash = function(url) {
-    // url = url; //TODO remove trailing slash
-    return md5(url);
+    client: privateClient,
   };
 
   //
